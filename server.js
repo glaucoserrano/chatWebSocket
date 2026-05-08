@@ -1,0 +1,54 @@
+'use strict';
+
+require('dotenv').config();
+
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const { WebSocketServer } = require('ws');
+const { setupChatHandler } = require('./src/chatHandler');
+
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || 'localhost';
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css':  'text/css',
+  '.js':   'application/javascript',
+  '.json': 'application/json',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.ico':  'image/x-icon',
+  '.svg':  'image/svg+xml',
+};
+
+const server = http.createServer((req, res) => {
+  const urlPath = req.url === '/' ? '/index.html' : req.url;
+  const filePath = path.join(PUBLIC_DIR, path.normalize(urlPath));
+
+  // Proteção contra directory traversal
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    return res.end('Forbidden');
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME[ext] || 'application/octet-stream';
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Arquivo não encontrado');
+    }
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(data);
+  });
+});
+
+const wss = new WebSocketServer({ server });
+setupChatHandler(wss);
+
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Servidor rodando em http://${HOST}:${PORT}`);
+});

@@ -1,0 +1,25 @@
+# Dependências
+node_modules/
+
+# Dados persistidos (gerado em runtime)
+data/messages.json
+
+# Variáveis de ambiente (nunca subir para o repositório)
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage de testes
+coverage/
