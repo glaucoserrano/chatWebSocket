@@ -57,33 +57,34 @@ describe('DB - persistência de mensagens', () => {
     saveMessage({ room: 'geral', name: 'Alice', text: 'Olá!', timestamp: '2026-01-01T00:00:00.000Z' });
     saveMessage({ room: 'geral', name: 'Bob', text: 'Oi!', timestamp: '2026-01-01T00:00:01.000Z' });
 
-    const history = getHistory('geral');
-    expect(history).toHaveLength(2);
-    expect(history[0].name).toBe('Alice');
-    expect(history[1].text).toBe('Oi!');
+    const result = getHistory('geral');
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[0].name).toBe('Alice');
+    expect(result.messages[1].text).toBe('Oi!');
   });
 
   test('retorna array vazio para sala sem histórico', () => {
-    const history = getHistory('sala-inexistente');
-    expect(history).toEqual([]);
+    const result = getHistory('sala-inexistente');
+    expect(result.messages).toEqual([]);
+    expect(result.hasMore).toBe(false);
   });
 
   test('respeita o limite de mensagens retornadas', () => {
     for (let i = 0; i < 10; i++) {
       saveMessage({ room: 'geral', name: 'User', text: `msg ${i}`, timestamp: new Date().toISOString() });
     }
-    const history = getHistory('geral', 5);
-    expect(history).toHaveLength(5);
+    const result = getHistory('geral', 5);
+    expect(result.messages).toHaveLength(5);
     // Deve retornar as 5 mais recentes
-    expect(history[history.length - 1].text).toBe('msg 9');
+    expect(result.messages[result.messages.length - 1].text).toBe('msg 9');
   });
 
   test('mensagens de salas diferentes não se misturam', () => {
     saveMessage({ room: 'geral', name: 'Alice', text: 'Olá geral', timestamp: new Date().toISOString() });
     saveMessage({ room: 'tecnologia', name: 'Bob', text: 'Olá tech', timestamp: new Date().toISOString() });
 
-    expect(getHistory('geral')).toHaveLength(1);
-    expect(getHistory('tecnologia')).toHaveLength(1);
-    expect(getHistory('geral')[0].text).toBe('Olá geral');
+    expect(getHistory('geral').messages).toHaveLength(1);
+    expect(getHistory('tecnologia').messages).toHaveLength(1);
+    expect(getHistory('geral').messages[0].text).toBe('Olá geral');
   });
 });
