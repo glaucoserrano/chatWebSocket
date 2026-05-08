@@ -176,6 +176,13 @@ function searchMessages(room, term) {
   }));
 }
 
+function closeDb() {
+  if (db) {
+    console.log('[db] Fechando conexão SQLite...');
+    db.close();
+  }
+}
+
 module.exports = {
   saveRoom,
   getRooms,
@@ -187,5 +194,6 @@ module.exports = {
   deleteMessage,
   deleteAllMessagesFromRoom,
   markAsRead,
-  searchMessages
+  searchMessages,
+  closeDb
 };

@@ -3,7 +3,7 @@
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const { RateLimiter } = require('./rateLimiter');
-const { saveMessage, getHistory, toggleReaction, editMessage, deleteMessage, saveRoom, getRooms, deleteRoom, markAsRead, searchMessages } = require('./db');
+const { saveMessage, getHistory, toggleReaction, editMessage, deleteMessage, saveRoom, getRooms, deleteRoom, markAsRead, searchMessages, closeDb } = require('./db');
 
 const MAX_NAME_LENGTH = parseInt(process.env.MAX_NAME_LENGTH || '20', 10);
 const MAX_MESSAGE_LENGTH = parseInt(process.env.MAX_MESSAGE_LENGTH || '500', 10);
@@ -117,210 +117,262 @@ function now() { return new Date().toISOString(); }
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 function handleJoin(ws, msg) {
-  const name = validateName(msg.name);
-  if (!name) { return send(ws, { type: 'error', text: 'Nome inválido. Use entre 1 e 20 caracteres.' }); }
+  try {
+    const name = validateName(msg.name);
+    if (!name) { return send(ws, { type: 'error', text: 'Nome inválido. Use entre 1 e 20 caracteres.' }); }
 
-  const roomName = msg.room || 'geral';
-  if (!ROOMS_DATA.has(roomName)) {
-    ROOMS_DATA.set(roomName, { name: roomName, creator: 'Sistema', createdAt: new Date().toISOString() });
+    const roomName = msg.room || 'geral';
+    if (!ROOMS_DATA.has(roomName)) {
+      ROOMS_DATA.set(roomName, { name: roomName, creator: 'Sistema', createdAt: new Date().toISOString() });
+    }
+    
+    const room = roomName;
+    if (isNameTaken(name, room, ws)) {
+      return send(ws, { type: 'error', text: `O nome "${name}" já está em uso nesta sala.` });
+    }
+
+    const sessionId = msg.sessionId || uuidv4();
+    clients.set(ws, { name, room, sessionId, isAlive: true, status: 'online' });
+
+    const { messages: history, hasMore } = getHistory(room, 30);
+    const roomInfo = ROOMS_DATA.get(room);
+    send(ws, { type: 'welcome', sessionId, name, room, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
+    
+    broadcastRoomList();
+
+    console.log(`[join] ${name} → "${room}"`);
+    broadcast({ type: 'info', text: `${name} entrou no chat 👋`, timestamp: now() }, room, ws);
+    broadcastUserList();
+  } catch (err) {
+    console.error('[handleJoin] Error:', err);
   }
-  
-  const room = roomName;
-  if (isNameTaken(name, room, ws)) {
-    return send(ws, { type: 'error', text: `O nome "${name}" já está em uso nesta sala.` });
-  }
-
-  const sessionId = msg.sessionId || uuidv4();
-  clients.set(ws, { name, room, sessionId, isAlive: true, status: 'online' });
-
-  const { messages: history, hasMore } = getHistory(room, 30);
-  const roomInfo = ROOMS_DATA.get(room);
-  send(ws, { type: 'welcome', sessionId, name, room, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
-  
-  broadcastRoomList();
-
-  console.log(`[join] ${name} → "${room}"`);
-  broadcast({ type: 'info', text: `${name} entrou no chat 👋`, timestamp: now() }, room, ws);
-  broadcastUserList();
 }
 
 function handleChatMessage(ws, msg, info) {
-  if (!info.name) { return send(ws, { type: 'error', text: 'Entre no chat antes de enviar mensagens.' }); }
+  try {
+    if (!info.name) { return send(ws, { type: 'error', text: 'Entre no chat antes de enviar mensagens.' }); }
 
-  const text = validateText(msg.text);
-  if (!text) { return send(ws, { type: 'error', text: `Mensagem inválida (máx ${MAX_MESSAGE_LENGTH} caracteres).` }); }
+    const text = validateText(msg.text);
+    if (!text) { return send(ws, { type: 'error', text: `Mensagem inválida (máx ${MAX_MESSAGE_LENGTH} caracteres).` }); }
 
-  // Valida e sanitiza replyTo, se presente
-  let replyTo = null;
-  if (msg.replyTo && typeof msg.replyTo === 'object') {
-    replyTo = {
-      id: String(msg.replyTo.id || '').slice(0, 36),
-      name: String(msg.replyTo.name || '').slice(0, MAX_NAME_LENGTH),
-      text: String(msg.replyTo.text || '').slice(0, 100),
-    };
+    // Valida e sanitiza replyTo, se presente
+    let replyTo = null;
+    if (msg.replyTo && typeof msg.replyTo === 'object') {
+      replyTo = {
+        id: String(msg.replyTo.id || '').slice(0, 36),
+        name: String(msg.replyTo.name || '').slice(0, MAX_NAME_LENGTH),
+        text: String(msg.replyTo.text || '').slice(0, 100),
+      };
+    }
+
+    const id = uuidv4();
+    const timestamp = now();
+    const payload = { type: 'message', id, name: info.name, text, room: info.room, timestamp, replyTo, reactions: {} };
+
+    broadcast(payload, info.room);
+    saveMessage({ id, room: info.room, name: info.name, text, timestamp, replyTo });
+  } catch (err) {
+    console.error('[handleChatMessage] Error:', err);
   }
-
-  const id = uuidv4();
-  const timestamp = now();
-  const payload = { type: 'message', id, name: info.name, text, room: info.room, timestamp, replyTo, reactions: {} };
-
-  broadcast(payload, info.room);
-  saveMessage({ id, room: info.room, name: info.name, text, timestamp, replyTo });
 }
 
 function handleTyping(ws, msg, info) {
-  if (!info.name) { return; }
-  broadcast({ type: 'typing', name: info.name, isTyping: !!msg.isTyping }, info.room, ws);
+  try {
+    if (!info.name) { return; }
+    broadcast({ type: 'typing', name: info.name, isTyping: !!msg.isTyping }, info.room, ws);
+  } catch (err) {
+    console.error('[handleTyping] Error:', err);
+  }
 }
 
 function handleSwitchRoom(ws, msg, info) {
-  if (!info.name) { return; }
-  const newRoom = msg.room ? msg.room.trim().toLowerCase() : 'geral';
-  if (!newRoom) return;
+  try {
+    if (!info.name) { return; }
+    const newRoom = msg.room ? msg.room.trim().toLowerCase() : 'geral';
+    if (!newRoom) return;
 
-  // Adiciona à lista de salas se for nova
-  if (!ROOMS_DATA.has(newRoom)) {
-    const rData = { name: newRoom, creator: info.name || 'Sistema', createdAt: new Date().toISOString() };
-    ROOMS_DATA.set(newRoom, rData);
-    saveRoom(newRoom, rData.creator);
-  }
-  
-  if (!ROOM_LABELS[newRoom]) ROOM_LABELS[newRoom] = `# ${newRoom}`;
+    // Adiciona à lista de salas se for nova
+    if (!ROOMS_DATA.has(newRoom)) {
+      const rData = { name: newRoom, creator: info.name || 'Sistema', createdAt: new Date().toISOString() };
+      ROOMS_DATA.set(newRoom, rData);
+      saveRoom(newRoom, rData.creator);
+    }
+    
+    if (!ROOM_LABELS[newRoom]) ROOM_LABELS[newRoom] = `# ${newRoom}`;
 
-  info.room = newRoom;
-  const { messages: history, hasMore } = getHistory(newRoom, 30);
-  const roomInfo = ROOMS_DATA.get(newRoom);
-  send(ws, { type: 'room_changed', room: newRoom, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
-  
-  broadcastRoomList();
-  
-  const oldRoom = info.room;
-  
-  broadcastUserList();
-  
-  if (oldRoom !== newRoom) {
-    broadcast({ type: 'info', text: `${info.name} entrou na sala 👋`, timestamp: now() }, newRoom, ws);
+    info.room = newRoom;
+    const { messages: history, hasMore } = getHistory(newRoom, 30);
+    const roomInfo = ROOMS_DATA.get(newRoom);
+    send(ws, { type: 'room_changed', room: newRoom, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
+    
+    broadcastRoomList();
+    
+    const oldRoom = info.room;
+    
     broadcastUserList();
+    
+    if (oldRoom !== newRoom) {
+      broadcast({ type: 'info', text: `${info.name} entrou na sala 👋`, timestamp: now() }, newRoom, ws);
+      broadcastUserList();
+    }
+    console.log(`[switch_room] ${info.name} → "${newRoom}"`);
+  } catch (err) {
+    console.error('[handleSwitchRoom] Error:', err);
   }
-  console.log(`[switch_room] ${info.name} → "${newRoom}"`);
 }
 
 function handleDeleteRoom(ws, msg, info) {
-  if (!info.name) return;
-  const room = msg.room;
-  if (room === 'geral') return send(ws, { type: 'error', text: 'A sala Geral não pode ser excluída.' });
-  
-  const roomInfo = ROOMS_DATA.get(room);
-  if (!roomInfo) return send(ws, { type: 'error', text: 'Sala não encontrada.' });
-  
-  if (roomInfo.creator !== info.name && info.name !== 'Admin') {
-    return send(ws, { type: 'error', text: 'Apenas o criador da sala pode excluí-la.' });
+  try {
+    if (!info.name) return;
+    const room = msg.room;
+    if (room === 'geral') return send(ws, { type: 'error', text: 'A sala Geral não pode ser excluída.' });
+    
+    const roomInfo = ROOMS_DATA.get(room);
+    if (!roomInfo) return send(ws, { type: 'error', text: 'Sala não encontrada.' });
+    
+    if (roomInfo.creator !== info.name && info.name !== 'Admin') {
+      return send(ws, { type: 'error', text: 'Apenas o criador da sala pode excluí-la.' });
+    }
+
+    // 1. Remove do banco de dados (SQLite lida com mensagens via deleteRoom)
+    deleteRoom(room);
+
+    // 2. Remove a sala da lista
+    ROOMS_DATA.delete(room);
+    delete ROOM_LABELS[room];
+
+    // 3. Avisa a todos
+    broadcast({ type: 'room_deleted', room }, room); // Avisa quem está na sala
+    broadcastRoomList(); // Atualiza lista para todos
+    
+    console.log(`[delete_room] ${info.name} excluiu a sala "${room}"`);
+  } catch (err) {
+    console.error('[handleDeleteRoom] Error:', err);
   }
-
-  // 1. Remove do banco de dados (SQLite lida com mensagens via deleteRoom)
-  deleteRoom(room);
-
-  // 2. Remove a sala da lista
-  ROOMS_DATA.delete(room);
-  delete ROOM_LABELS[room];
-
-  // 3. Avisa a todos
-  broadcast({ type: 'room_deleted', room }, room); // Avisa quem está na sala
-  broadcastRoomList(); // Atualiza lista para todos
-  
-  console.log(`[delete_room] ${info.name} excluiu a sala "${room}"`);
 }
 
 /** Paginação: cliente pede mensagens anteriores à mensagem de ID `before` */
 function handleLoadHistory(ws, msg, info) {
-  if (!info.name) { return; }
-  const room = msg.room || info.room;
-  const { messages, hasMore } = getHistory(room, 30, msg.before || null);
-  send(ws, { type: 'history_chunk', messages, hasMore, room });
+  try {
+    if (!info.name) { return; }
+    const room = msg.room || info.room;
+    const { messages, hasMore } = getHistory(room, 30, msg.before || null);
+    send(ws, { type: 'history_chunk', messages, hasMore, room });
+  } catch (err) {
+    console.error('[handleLoadHistory] Error:', err);
+  }
 }
 
 /** Toggle de reação emoji em uma mensagem */
 function handleReact(ws, msg, info) {
-  if (!info.name) { return; }
-  if (!ALLOWED_REACTIONS.includes(msg.emoji)) {
-    return send(ws, { type: 'error', text: 'Emoji não permitido.' });
+  try {
+    if (!info.name) { return; }
+    if (!ALLOWED_REACTIONS.includes(msg.emoji)) {
+      return send(ws, { type: 'error', text: 'Emoji não permitido.' });
+    }
+
+    const room = msg.room || info.room;
+    const reactions = toggleReaction(room, msg.messageId, msg.emoji, info.name);
+    if (reactions === null) { return send(ws, { type: 'error', text: 'Mensagem não encontrada.' }); }
+
+    broadcast({ type: 'reaction_update', messageId: msg.messageId, reactions, room: room }, room);
+  } catch (err) {
+    console.error('[handleReact] Error:', err);
   }
-
-  const room = msg.room || info.room;
-  const reactions = toggleReaction(room, msg.messageId, msg.emoji, info.name);
-  if (reactions === null) { return send(ws, { type: 'error', text: 'Mensagem não encontrada.' }); }
-
-  broadcast({ type: 'reaction_update', messageId: msg.messageId, reactions, room: room }, room);
 }
 
 /** Editar mensagem própria (janela de 15 min) */
 function handleEditMessage(ws, msg, info) {
-  if (!info.name) { return; }
-  const text = validateText(msg.text);
-  if (!text) { return send(ws, { type: 'error', text: 'Texto inválido para edição.' }); }
+  try {
+    if (!info.name) { return; }
+    const text = validateText(msg.text);
+    if (!text) { return send(ws, { type: 'error', text: 'Texto inválido para edição.' }); }
 
-  const room = msg.room || info.room;
-  const result = editMessage(room, msg.id, text, info.name);
-  if (result.error) { return send(ws, { type: 'error', text: result.error }); }
+    const room = msg.room || info.room;
+    const result = editMessage(room, msg.id, text, info.name);
+    if (result.error) { return send(ws, { type: 'error', text: result.error }); }
 
-  broadcast({ type: 'message_edited', id: msg.id, text: text, editedAt: result.message.editedAt, room }, room);
-  console.log(`[edit] ${info.name} editou mensagem ${msg.id}`);
+    broadcast({ type: 'message_edited', id: msg.id, text: text, editedAt: result.message.editedAt, room }, room);
+    console.log(`[edit] ${info.name} editou mensagem ${msg.id}`);
+  } catch (err) {
+    console.error('[handleEditMessage] Error:', err);
+  }
 }
 
 function handleDeleteMessage(ws, msg, info) {
-  if (!info.name) { return; }
-  const room = msg.room || info.room;
-  const result = deleteMessage(room, msg.id, info.name);
-  if (result.error) { return send(ws, { type: 'error', text: result.error }); }
+  try {
+    if (!info.name) { return; }
+    const room = msg.room || info.room;
+    const result = deleteMessage(room, msg.id, info.name);
+    if (result.error) { return send(ws, { type: 'error', text: result.error }); }
 
-  broadcast({ type: 'message_deleted', id: msg.id, room }, room);
-  console.log(`[delete] ${info.name} deletou mensagem ${msg.id}`);
+    broadcast({ type: 'message_deleted', id: msg.id, room }, room);
+    console.log(`[delete] ${info.name} deletou mensagem ${msg.id}`);
+  } catch (err) {
+    console.error('[handleDeleteMessage] Error:', err);
+  }
 }
 
 function handleSetStatus(ws, msg, info) {
-  if (!info.name) return;
-  const validStatuses = ['online', 'away', 'busy'];
-  const status = validStatuses.includes(msg.status) ? msg.status : 'online';
-  info.status = status;
-  
-  broadcastUserList();
-  
-  console.log(`[status] ${info.name} -> ${status}`);
+  try {
+    if (!info.name) return;
+    const validStatuses = ['online', 'away', 'busy'];
+    const status = validStatuses.includes(msg.status) ? msg.status : 'online';
+    info.status = status;
+    
+    broadcastUserList();
+    
+    console.log(`[status] ${info.name} -> ${status}`);
+  } catch (err) {
+    console.error('[handleSetStatus] Error:', err);
+  }
 }
 
 function handlePrivateMessage(ws, msg, info) {
-  if (!info.name) return send(ws, { type: 'error', text: 'Entre no chat antes de enviar mensagens.' });
-  const targetWs = findWsByName(msg.to);
-  if (!targetWs) return send(ws, { type: 'error', text: `Usuário "${msg.to}" não está online.` });
+  try {
+    if (!info.name) return send(ws, { type: 'error', text: 'Entre no chat antes de enviar mensagens.' });
+    const targetWs = findWsByName(msg.to);
+    if (!targetWs) return send(ws, { type: 'error', text: `Usuário "${msg.to}" não está online.` });
 
-  const text = validateText(msg.text);
-  if (!text) return send(ws, { type: 'error', text: 'Mensagem inválida.' });
+    const text = validateText(msg.text);
+    if (!text) return send(ws, { type: 'error', text: 'Mensagem inválida.' });
 
-  const id = uuidv4();
-  const timestamp = now();
-  const room = getPrivateRoomId(info.name, msg.to);
-  
-  // Suporte a replyTo em DMs
-  const replyTo = msg.replyTo || null;
-  
-  const payload = { type: 'message', id, name: info.name, text, room, timestamp, isPrivate: true, to: msg.to, replyTo };
+    const id = uuidv4();
+    const timestamp = now();
+    const room = getPrivateRoomId(info.name, msg.to);
+    
+    // Suporte a replyTo em DMs
+    const replyTo = msg.replyTo || null;
+    
+    const payload = { type: 'message', id, name: info.name, text, room, timestamp, isPrivate: true, to: msg.to, replyTo };
 
-  send(ws, payload); // Envia para o remetente
-  send(targetWs, payload); // Envia para o destinatário
-  saveMessage({ id, room, name: info.name, text, timestamp, isPrivate: true, to: msg.to, replyTo });
+    send(ws, payload); // Envia para o remetente
+    send(targetWs, payload); // Envia para o destinatário
+    saveMessage({ id, room, name: info.name, text, timestamp, isPrivate: true, to: msg.to, replyTo });
+  } catch (err) {
+    console.error('[handlePrivateMessage] Error:', err);
+  }
 }
 
 function handleMarkRead(ws, msg, info) {
-  if (!info.name) return;
-  markAsRead(msg.messageId, info.name);
-  // Notifica o remetente original (opcional, para UI de checks)
-  broadcast({ type: 'message_read', messageId: msg.messageId, user: info.name, room: msg.room }, msg.room);
+  try {
+    if (!info.name) return;
+    markAsRead(msg.messageId, info.name);
+    // Notifica o remetente original (opcional, para UI de checks)
+    broadcast({ type: 'message_read', messageId: msg.messageId, user: info.name, room: msg.room }, msg.room);
+  } catch (err) {
+    console.error('[handleMarkRead] Error:', err);
+  }
 }
 
 function handleSearch(ws, msg, info) {
-  if (!info.name || !msg.term) return;
-  const results = searchMessages(msg.room || info.room, msg.term);
-  send(ws, { type: 'search_results', results, term: msg.term });
+  try {
+    if (!info.name || !msg.term) return;
+    const results = searchMessages(msg.room || info.room, msg.term);
+    send(ws, { type: 'search_results', results, term: msg.term });
+  } catch (err) {
+    console.error('[handleSearch] Error:', err);
+  }
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -339,7 +391,15 @@ function setupChatHandler(wss) {
     });
   }, HEARTBEAT_INTERVAL);
 
-  wss.on('close', () => clearInterval(heartbeatTimer));
+  // Graceful Shutdown
+  process.on('SIGTERM', () => {
+    console.log('[server] Recebido SIGTERM — Encerrando servidor...');
+    clearInterval(heartbeatTimer);
+    wss.close(() => {
+      closeDb();
+      process.exit(0);
+    });
+  });
 
   wss.on('connection', (ws, req) => {
     console.log(`[conexão] ${req.socket.remoteAddress}`);

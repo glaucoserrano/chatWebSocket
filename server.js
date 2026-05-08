@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const { setupChatHandler } = require('./src/chatHandler');
+const { closeDb } = require('./src/db');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 // Em produção (Railway, Render, etc.) deve escutar em 0.0.0.0
@@ -51,7 +52,19 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 setupChatHandler(wss);
 
-server.listen(PORT, HOST, () => {
+// Graceful Shutdown para Railway
+process.on('SIGTERM', () => {
+  console.log('[server] Recebido SIGTERM — Encerrando suavemente...');
+  wss.close(() => {
+    closeDb();
+    server.close(() => {
+      console.log('[server] Processo encerrado com sucesso.');
+      process.exit(0);
+    });
+  });
+});
+
+const serverStart = server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando em http://${HOST}:${PORT}`);
 });
 
