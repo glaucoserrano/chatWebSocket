@@ -186,10 +186,13 @@ function handleTyping(ws, msg, info) {
 }
 
 function handleSwitchRoom(ws, msg, info) {
+  const start = Date.now();
   try {
     if (!info.name) { return; }
     const newRoom = msg.room ? msg.room.trim().toLowerCase() : 'geral';
     if (!newRoom) return;
+
+    const oldRoom = info.room;
 
     // Adiciona à lista de salas se for nova
     if (!ROOMS_DATA.has(newRoom)) {
@@ -206,16 +209,12 @@ function handleSwitchRoom(ws, msg, info) {
     send(ws, { type: 'room_changed', room: newRoom, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
     
     broadcastRoomList();
-    
-    const oldRoom = info.room;
-    
     broadcastUserList();
     
-    if (oldRoom !== newRoom) {
+    if (oldRoom && oldRoom !== newRoom) {
       broadcast({ type: 'info', text: `${info.name} entrou na sala 👋`, timestamp: now() }, newRoom, ws);
-      broadcastUserList();
     }
-    console.log(`[switch_room] ${info.name} → "${newRoom}"`);
+    console.log(`[switch_room] ${info.name} → "${newRoom}" (${Date.now() - start}ms)`);
   } catch (err) {
     console.error('[handleSwitchRoom] Error:', err);
   }

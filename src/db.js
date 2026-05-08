@@ -15,6 +15,7 @@ let db;
 try {
   console.log(`[db] Iniciando banco de dados em: ${DB_FILE}`);
   db = new Database(DB_FILE, { timeout: 5000 });
+  db.pragma('journal_mode = WAL'); // Modo de alta performance
   
   // Inicializa Tabelas
   db.exec(`
