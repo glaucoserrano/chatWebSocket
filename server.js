@@ -9,7 +9,9 @@ const { WebSocketServer } = require('ws');
 const { setupChatHandler } = require('./src/chatHandler');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const HOST = process.env.HOST || 'localhost';
+// Em produção (Railway, Render, etc.) deve escutar em 0.0.0.0
+// 'localhost' só aceita conexões internas — causa 502 em cloud providers
+const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const MIME = {
@@ -51,4 +53,9 @@ setupChatHandler(wss);
 
 server.listen(PORT, HOST, () => {
   console.log(`🚀 Servidor rodando em http://${HOST}:${PORT}`);
+});
+
+server.on('error', (err) => {
+  console.error(`❌ Falha ao iniciar servidor: ${err.message}`);
+  process.exit(1);
 });
