@@ -11,50 +11,65 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const db = new Database(DB_FILE);
+let db;
+try {
+  console.log(`[db] Iniciando banco de dados em: ${DB_FILE}`);
+  db = new Database(DB_FILE, { timeout: 5000 });
+  
+  // Inicializa Tabelas
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      name TEXT PRIMARY KEY,
+      creator TEXT,
+      createdAt TEXT
+    );
 
-// Inicializa Tabelas
-db.exec(`
-  CREATE TABLE IF NOT EXISTS rooms (
-    name TEXT PRIMARY KEY,
-    creator TEXT,
-    createdAt TEXT
-  );
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      room TEXT,
+      name TEXT,
+      text TEXT,
+      timestamp TEXT,
+      replyTo TEXT,
+      reactions TEXT DEFAULT '{}',
+      deleted INTEGER DEFAULT 0,
+      editedAt TEXT,
+      isPrivate INTEGER DEFAULT 0,
+      targetUser TEXT,
+      readBy TEXT DEFAULT '[]'
+    );
 
-  CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    room TEXT,
-    name TEXT,
-    text TEXT,
-    timestamp TEXT,
-    replyTo TEXT,
-    reactions TEXT DEFAULT '{}',
-    deleted INTEGER DEFAULT 0,
-    editedAt TEXT,
-    isPrivate INTEGER DEFAULT 0,
-    targetUser TEXT,
-    readBy TEXT DEFAULT '[]'
-  );
+    CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room);
+  `);
 
-  CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room);
-`);
+  console.log('[db] Tabelas verificadas/criadas com sucesso.');
 
-// Insere sala Geral por padrão
-const stmtRoom = db.prepare('INSERT OR IGNORE INTO rooms (name, creator, createdAt) VALUES (?, ?, ?)');
-stmtRoom.run('geral', 'Sistema', new Date().toISOString());
+  // Insere sala Geral por padrão
+  const stmtRoom = db.prepare('INSERT OR IGNORE INTO rooms (name, creator, createdAt) VALUES (?, ?, ?)');
+  stmtRoom.run('geral', 'Sistema', new Date().toISOString());
+  console.log('[db] Banco de dados pronto.');
+} catch (err) {
+  console.error('❌ ERRO CRÍTICO NO BANCO DE DADOS:', err.message);
+  console.error('Verifique as permissões da pasta "data" ou se o volume está montado corretamente.');
+  // Em vez de process.exit, vamos tentar rodar mesmo sem banco (embora falhe depois) 
+  // para vermos o erro no log do Railway antes do SIGTERM
+}
 
 /** --- SALAS --- **/
 
 function saveRoom(name, creator) {
+  if (!db) return;
   const stmt = db.prepare('INSERT OR IGNORE INTO rooms (name, creator, createdAt) VALUES (?, ?, ?)');
   stmt.run(name, creator, new Date().toISOString());
 }
 
 function getRooms() {
+  if (!db) return [];
   return db.prepare('SELECT * FROM rooms').all();
 }
 
 function deleteRoom(name) {
+  if (!db) return;
   db.prepare('DELETE FROM rooms WHERE name = ?').run(name);
   db.prepare('DELETE FROM messages WHERE room = ?').run(name);
 }
@@ -62,6 +77,7 @@ function deleteRoom(name) {
 /** --- MENSAGENS --- **/
 
 function saveMessage(msg) {
+  if (!db) return;
   const stmt = db.prepare(`
     INSERT INTO messages (id, room, name, text, timestamp, replyTo, reactions, deleted, isPrivate, targetUser)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -81,6 +97,7 @@ function saveMessage(msg) {
 }
 
 function getHistory(room, limit = 30, before = null) {
+  if (!db) return { messages: [], hasMore: false };
   let query = 'SELECT * FROM messages WHERE room = ?';
   const params = [room];
 
@@ -113,6 +130,7 @@ function getHistory(room, limit = 30, before = null) {
 }
 
 function toggleReaction(room, messageId, emoji, username) {
+  if (!db) return null;
   const msg = db.prepare('SELECT reactions FROM messages WHERE id = ?').get(messageId);
   if (!msg) return null;
 
@@ -132,6 +150,7 @@ function toggleReaction(room, messageId, emoji, username) {
 }
 
 function editMessage(room, messageId, newText, username) {
+  if (!db) return { error: 'Banco de dados offline.' };
   const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
   if (!msg) return { error: 'Mensagem não encontrada.' };
   if (msg.name !== username) return { error: 'Não autorizado.' };
@@ -142,6 +161,7 @@ function editMessage(room, messageId, newText, username) {
 }
 
 function deleteMessage(room, messageId, username) {
+  if (!db) return { error: 'Banco de dados offline.' };
   const msg = db.prepare('SELECT name FROM messages WHERE id = ?').get(messageId);
   if (!msg) return { error: 'Mensagem não encontrada.' };
   if (msg.name !== username) return { error: 'Não autorizado.' };
@@ -151,10 +171,12 @@ function deleteMessage(room, messageId, username) {
 }
 
 function deleteAllMessagesFromRoom(room) {
+  if (!db) return;
   db.prepare('DELETE FROM messages WHERE room = ?').run(room);
 }
 
 function markAsRead(messageId, username) {
+  if (!db) return;
   const msg = db.prepare('SELECT readBy FROM messages WHERE id = ?').get(messageId);
   if (!msg) return;
 
@@ -166,6 +188,7 @@ function markAsRead(messageId, username) {
 }
 
 function searchMessages(room, term) {
+  if (!db) return [];
   const query = 'SELECT * FROM messages WHERE room = ? AND text LIKE ? AND deleted = 0 ORDER BY timestamp DESC LIMIT 50';
   const rows = db.prepare(query).all(room, `%${term}%`);
   return rows.map(m => ({

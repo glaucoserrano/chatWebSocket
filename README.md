@@ -1,61 +1,70 @@
 # 💬 Chat WebSocket Premium
 
-Um sistema de chat em tempo real moderno, robusto e elegante, construído com Node.js e WebSockets, contando com persistência em SQLite e interface responsiva com Glassmorphism.
+[![Node.js](https://img.shields.io/badge/Node.js-LTS-green.svg)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-3-blue.svg)](https://sqlite.org/)
+[![WebSocket](https://img.shields.io/badge/Websocket-Pure-orange.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
 
-## 🚀 Principais Funcionalidades
-
-- **Salas Dinâmicas**: Crie e gerencie salas públicas. O criador tem poder total sobre a sala.
-- **Conversas Privadas (DM)**: Inicie chats isolados com qualquer usuário online.
-- **Persistência Profissional**: Migrado de arquivos JSON para **SQLite**, garantindo que salas e mensagens sobrevivam a reinícios.
-- **Interatividade Total**:
-  - **Reações**: Adicione emojis às mensagens.
-  - **Respostas (Reply)**: Responda a mensagens específicas com citação.
-  - **Edição e Exclusão**: Altere ou remova suas mensagens (com janela de 15 minutos).
-- **Recursos Avançados**:
-  - **Busca de Mensagens**: Pesquise no histórico da sala atual.
-  - **Checks de Leitura (✓✓)**: Saiba quando sua mensagem foi entregue e lida.
-  - **Sons de Notificação**: Alerta sonoro para novas DMs.
-  - **Status de Usuário**: Online, Ausente ou Ocupado.
-- **Design Premium**: Modo escuro/claro automático, modais estilizados e interface totalmente responsiva.
-
-## 🛠️ Tecnologias Utilizadas
-
-- **Backend**: Node.js, `ws` (WebSockets), `better-sqlite3` (Banco de Dados).
-- **Frontend**: HTML5, CSS3 (Vanilla), JavaScript (ES6+).
-- **Persistência**: SQLite 3.
-
-## 📦 Como Rodar Localmente
-
-1. **Instale as dependências**:
-   ```bash
-   npm install
-   ```
-2. **Inicie o servidor**:
-   ```bash
-   npm start
-   ```
-   Ou para desenvolvimento com auto-reload:
-   ```bash
-   npm run dev
-   ```
-3. Abra `http://localhost:3000` no seu navegador.
-
-## ☁️ Deploy no Railway (Importante!)
-
-Este projeto foi otimizado para o **Railway.com**. Devido ao uso do SQLite, você **deve** configurar um Volume para não perder dados:
-
-1. No painel do serviço no Railway, vá em **Volumes**.
-2. Clique em **Add Volume**.
-3. Configure o **Mount Path** como: `/app/data`
-4. Isso garantirá que o arquivo `chat.db` seja persistido permanentemente.
-
-## 📁 Estrutura do Projeto
-
-- `server.js`: Ponto de entrada da aplicação.
-- `src/chatHandler.js`: Lógica principal do protocolo de mensagens e salas.
-- `src/db.js`: Gerenciamento do banco de dados SQLite.
-- `public/`: Interface frontend (HTML, CSS e JS).
-- `data/`: Local de armazenamento do banco de dados (protegido via .gitignore).
+Um ecossistema de comunicação em tempo real projetado para alta performance, escalabilidade e resiliência. Este projeto demonstra habilidades avançadas em **Backend (Node.js)**, **Persistência (SQLite)** e **Arquitetura de Sistemas**.
 
 ---
-*Desenvolvido com foco em performance e experiência do usuário.*
+
+## 🚀 Funcionalidades de Destaque
+
+### 💎 Experiência do Usuário (UX)
+- **Mensageria Híbrida**: Salas públicas dinâmicas e Chats Privados (DMs) isolados.
+- **Interatividade Social**: Sistema de reações com emojis e respostas (Reply) contextuais.
+- **Gestão de Mensagens**: Edição e exclusão de mensagens com "soft delete".
+- **Visualização de Status**: Indicadores de Online, Ausente e Ocupado em tempo real.
+- **Confirmação de Leitura (✓✓)**: Lógica de "visto" implementada via `IntersectionObserver`.
+
+### 🛠️ Engenharia de Software
+- **Persistência Robusta**: Migração de JSON para **SQLite**, garantindo integridade de dados e consultas rápidas via índices.
+- **Graceful Shutdown**: Tratamento de sinais `SIGTERM` para fechamento limpo do banco de dados e prevenção de corrupção de arquivos.
+- **Sincronização Global**: Broadcast inteligente de salas e usuários para todos os clientes conectados.
+- **Busca Indexada**: Mecanismo de busca no histórico de mensagens integrado ao backend.
+
+---
+
+## 🏗️ Decisões de Arquitetura (The "Why")
+
+1. **WebSockets vs HTTP Polling**: Optamos por WebSockets puros para garantir a menor latência possível, essencial para uma experiência de chat fluida.
+2. **SQLite para Persistência**: Escolhido pela sua natureza *self-contained* e zero configuração, sendo ideal para aplicações que precisam de performance de SQL sem a complexidade de um servidor de banco de dados separado inicialmente.
+3. **Vanilla JS no Frontend**: Demonstra domínio total da DOM API e princípios fundamentais de JavaScript, sem dependência de frameworks pesados para uma UI rápida e reativa.
+
+---
+
+## 📈 Visão de Negócio & Monetização
+
+Este projeto foi concebido como um **MVP (Minimum Viable Product)** escalável. Potenciais modelos de negócio incluem:
+
+1. **SaaS para Comunidades Nichadas**: Chat exclusivo para eventos online ou fóruns de membros.
+2. **Widget White-Label**: API de comunicação interna para empresas que priorizam privacidade de dados.
+3. **Modelo Freemium**: Monetização via salas VIP, temas customizados ou limites expandidos de upload.
+
+---
+
+## ☁️ Deploy & Infraestrutura
+
+O projeto está pronto para produção, com suporte nativo a volumes em PaaS como **Railway**.
+
+### Configuração de Volume (Railway)
+Para persistência de dados, mapeie um volume no Railway:
+- **Mount Path**: `/app/data`
+
+---
+
+## 📦 Como Instalar
+
+```bash
+# Clone o repositório
+git clone https://github.com/seu-usuario/chatWebSocket.git
+
+# Instale as dependências
+npm install
+
+# Inicie o servidor
+npm start
+```
+
+---
+*Este projeto faz parte do meu portfólio técnico. Sinta-se à vontade para explorar o código e entrar em contato para oportunidades de colaboração.*
