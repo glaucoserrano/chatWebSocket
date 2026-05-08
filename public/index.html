@@ -1097,6 +1097,10 @@
       setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
+    function getPrivateRoomId(u1, u2) {
+      return 'p:' + [u1, u2].sort().join(':');
+    }
+
     function formatTime(iso) {
       if (!iso) return '';
       const d = new Date(iso);
@@ -1679,10 +1683,13 @@
             break;
 
           case 'message':
-            if (msg.room === myRoom) {
+            const isMyPrivate = msg.isPrivate && (msg.to === myName || msg.name === myName);
+            const isRelevantPrivate = isMyPrivate && (activePrivateChat === msg.to || activePrivateChat === msg.name);
+
+            if (msg.room === myRoom || isRelevantPrivate) {
               renderMessage(msg);
             } else if (msg.isPrivate && msg.to === myName) {
-              // Nova DM recebida e não estou nela
+              // Notificação de nova DM quando não estou nela
               if (activePrivateChat !== msg.name) {
                 dmList.add(msg.name);
                 const count = (unreadDMs.get(msg.name) || 0) + 1;
@@ -1811,7 +1818,7 @@
     }
 
     function getActiveRoomId() {
-      return activePrivateChat ? 'p:' + [myName, activePrivateChat].sort().join(':') : myRoom;
+      return activePrivateChat ? getPrivateRoomId(myName, activePrivateChat) : myRoom;
     }
 
     function enviar() {
