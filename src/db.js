@@ -163,11 +163,15 @@ function editMessage(room, messageId, newText, username) {
 
 function deleteMessage(room, messageId, username) {
   if (!db) return { error: 'Banco de dados offline.' };
-  const msg = db.prepare('SELECT name FROM messages WHERE id = ?').get(messageId);
+  const msg = db.prepare('SELECT name, isPrivate FROM messages WHERE id = ?').get(messageId);
   if (!msg) return { error: 'Mensagem não encontrada.' };
-  if (msg.name !== username) return { error: 'Não autorizado.' };
 
-  db.prepare('UPDATE messages SET deleted = 1, text = "[mensagem removida]" WHERE id = ?').run(messageId);
+  const isGlauco = username.toLowerCase() === 'glauco';
+  const canModerate = isGlauco && !msg.isPrivate;
+
+  if (msg.name !== username && !canModerate) return { error: 'Não autorizado.' };
+
+  db.prepare('UPDATE messages SET deleted = 1, text = ? WHERE id = ?').run('[mensagem removida]', messageId);
   return { success: true };
 }
 

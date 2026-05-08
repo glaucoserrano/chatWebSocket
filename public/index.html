@@ -904,7 +904,8 @@
       <div class="topbar-actions">
         <span id="searchBtn" title="Buscar mensagens" style="cursor:pointer;font-size:1.1rem;opacity:0.8">🔍</span>
         <span class="online-badge" id="online-count">● 1 online</span>
-        <span id="deleteRoomBtn" title="Excluir Sala" style="display:none; cursor:pointer; margin: 0 10px;">🗑️</span>
+        <span id="clearMessagesBtn" title="Limpar Mensagens" style="display:none; cursor:pointer; margin: 0 5px;">🧹</span>
+        <span id="deleteRoomBtn" title="Excluir Sala" style="display:none; cursor:pointer; margin: 0 5px;">🗑️</span>
         <select id="status-selector" title="Meu Status">
           <option value="online">🟢 Online</option>
           <option value="away">🟡 Ausente</option>
@@ -1299,7 +1300,10 @@
       replyBtn.onclick = () => setReplyTo(msg);
       actions.appendChild(replyBtn);
 
-      if (isMine) {
+      const isSuperAdmin = myName.toLowerCase() === 'glauco';
+      const canModerate = isSuperAdmin && !msg.isPrivate;
+      
+      if (isMine || canModerate) {
         const editBtn = document.createElement('span');
         editBtn.className = 'action-btn';
         editBtn.textContent = '✏️';
@@ -1310,12 +1314,13 @@
         delBtn.className = 'action-btn';
         delBtn.textContent = '🗑️';
         delBtn.onclick = () => {
+          const room = getActiveRoomId();
           showModal({
             title: 'Deletar Mensagem',
-            text: 'Tem certeza que deseja remover esta mensagem?',
+            text: canModerate ? 'Você está deletando esta mensagem como Moderador.' : 'Tem certeza que deseja remover esta mensagem?',
             confirmText: 'Deletar',
             danger: true,
-            onConfirm: () => wsSend({ type: 'delete_message', id: msg.id, room: getActiveRoomId() })
+            onConfirm: () => wsSend({ type: 'delete_message', id: msg.id, room })
           });
         };
         actions.appendChild(delBtn);
@@ -1519,7 +1524,10 @@
         metaEl.textContent = `Criada por ${roomInfo.creator} em ${date}`;
         
         const isCreator = roomInfo.creator.trim().toLowerCase() === myName.trim().toLowerCase();
+        const isSuperAdmin = myName.trim().toLowerCase() === 'glauco';
+        
         delBtn.style.display = (isCreator && room !== 'geral') ? 'block' : 'none';
+        document.getElementById('clearMessagesBtn').style.display = (isCreator || isSuperAdmin) ? 'block' : 'none';
       } else {
         metaEl.textContent = '';
         delBtn.style.display = 'none';
@@ -1569,6 +1577,16 @@
         }
       });
     });
+
+    document.getElementById('clearMessagesBtn').onclick = () => {
+      showModal({
+        title: 'Limpar Histórico',
+        text: 'Deseja apagar todas as mensagens desta sala? Esta ação não pode ser desfeita.',
+        confirmText: 'Limpar Agora',
+        danger: true,
+        onConfirm: () => wsSend({ type: 'clear_messages', room: myRoom })
+      });
+    };
 
     document.getElementById('deleteRoomBtn').onclick = () => {
       if (!myRoom || myRoom === 'geral') return;
@@ -1680,6 +1698,13 @@
             hasMoreHistory = !!msg.hasMore;
             document.getElementById('load-more').classList.remove('show');
             renderHistoryChunk(msg.messages || []);
+            break;
+
+          case 'messages_cleared':
+            if (msg.room === myRoom) {
+              messagesEl.innerHTML = '<div id="load-more">Histórico limpo pelo criador.</div>';
+              showToast('🧹 O histórico da sala foi limpo.');
+            }
             break;
 
           case 'message':

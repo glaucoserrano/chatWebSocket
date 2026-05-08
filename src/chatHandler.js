@@ -3,7 +3,7 @@
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const { RateLimiter } = require('./rateLimiter');
-const { saveMessage, getHistory, toggleReaction, editMessage, deleteMessage, saveRoom, getRooms, deleteRoom, markAsRead, searchMessages, closeDb } = require('./db');
+const { saveMessage, getHistory, toggleReaction, editMessage, deleteMessage, saveRoom, getRooms, deleteRoom, markAsRead, searchMessages, closeDb, deleteAllMessagesFromRoom } = require('./db');
 
 const MAX_NAME_LENGTH = parseInt(process.env.MAX_NAME_LENGTH || '20', 10);
 const MAX_MESSAGE_LENGTH = parseInt(process.env.MAX_MESSAGE_LENGTH || '500', 10);
@@ -373,6 +373,26 @@ function handleSearch(ws, msg, info) {
     console.error('[handleSearch] Error:', err);
   }
 }
+function handleClearMessages(ws, msg, info) {
+  try {
+    if (!info.name) return;
+    const room = msg.room || info.room;
+    const roomInfo = ROOMS_DATA.get(room);
+    if (!roomInfo) return;
+
+    // Apenas criador, Admin ou Glauco pode limpar
+    const isGlauco = info.name.toLowerCase() === 'glauco';
+    if (roomInfo.creator !== info.name && info.name.toLowerCase() !== 'admin' && !isGlauco) {
+      return send(ws, { type: 'error', text: 'Apenas o criador pode limpar o histórico.' });
+    }
+
+    deleteAllMessagesFromRoom(room);
+    broadcast({ type: 'messages_cleared', room }, room);
+    console.log(`[clear] ${info.name} limpou mensagens de "${room}"`);
+  } catch (err) {
+    console.error('[handleClearMessages] Error:', err);
+  }
+}
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -434,6 +454,7 @@ function setupChatHandler(wss) {
         case 'delete_room':     handleDeleteRoom(ws, msg, info || {}); break;
         case 'mark_read':       handleMarkRead(ws, msg, info || {}); break;
         case 'search':          handleSearch(ws, msg, info || {}); break;
+        case 'clear_messages':  handleClearMessages(ws, msg, info || {}); break;
         default:               send(ws, { type: 'error', text: 'Tipo de mensagem desconhecido.' });
       }
     });
