@@ -1462,20 +1462,33 @@
 
     function openPrivateChat(name) {
       if (!name || name === myName) return;
+      
+      // 1. Atualiza estados
       activePrivateChat = name;
       dmList.add(name);
       unreadDMs.delete(name);
-      
       myRoom = getPrivateRoomId(myName, name);
+      
+      // 2. Limpa UI de mensagens e estados temporários
+      messagesEl.innerHTML = '<div id="load-more" class="show">Carregando conversa privada...</div>';
+      typingUsers.clear();
+      updateTypingBar();
+      firstMessageId = null;
+      hasMoreHistory = false;
+
+      // 3. Atualiza Topbar
       topbarRoom.textContent = `👤 ${name}`;
       document.getElementById('room-meta').textContent = 'Conversa Privada';
       document.getElementById('deleteRoomBtn').style.display = 'none';
       
-      messagesEl.innerHTML = '<div id="load-more">Carregando histórico...</div>';
+      // 4. Solicita histórico ao servidor
       wsSend({ type: 'load_history', room: myRoom });
       
+      // 5. Refresca listas laterais para mostrar o "Active"
       renderDMList();
       renderRoomList([...AVAILABLE_ROOMS]);
+      
+      // 6. Fecha sidebar no mobile
       sidebar.classList.remove('open');
     }
 
@@ -1524,11 +1537,13 @@
       container.innerHTML = '';
       rooms.forEach(r => {
         const div = document.createElement('div');
-        div.className = 'room-item' + (r === myRoom ? ' active' : '');
+        const isActive = (r === myRoom && !activePrivateChat);
+        div.className = 'room-item' + (isActive ? ' active' : '');
         div.dataset.room = r;
         div.textContent = ROOM_LABELS[r] || `# ${r}`;
         div.onclick = () => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          activePrivateChat = null; // Reseta ao entrar em sala pública
           wsSend({ type: 'switch_room', room: r });
         };
         container.appendChild(div);
@@ -1635,6 +1650,7 @@
             break;
 
           case 'room_changed':
+            activePrivateChat = null; // Garante que saiu do privado
             if (msg.rooms) {
               AVAILABLE_ROOMS.clear();
               msg.rooms.forEach(r => {
