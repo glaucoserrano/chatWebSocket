@@ -13,18 +13,47 @@ const RATE_MAX = parseInt(process.env.RATE_LIMIT_MAX || '10', 10);
 
 // Carrega salas do banco de dados
 const ROOMS_DATA = new Map();
+
+const INITIAL_ROOMS = [
+  { id: 'solteiros-sp', name: 'Solteiros de São Paulo 20+', category: '💖 Relacionamento', description: 'Encontre pessoas interessantes em São Paulo.', tags: ['sp', 'namoro', '+20'], capacity: 50 },
+  { id: 'programadores', name: 'Programadores Brasil', category: '💻 Tecnologia', description: 'Converse sobre programação e carreira.', tags: ['dev', 'carreira', 'node'], capacity: 50 },
+  { id: 'ingles', name: 'Inglês para Iniciantes', category: '🌍 Idiomas', description: 'Pratique seu inglês com outras pessoas.', tags: ['english', 'idiomas', 'estudo'], capacity: 50 },
+  { id: 'gamers', name: 'Gamers Online', category: '🎮 Games', description: 'Encontre duo para sua partida.', tags: ['games', 'jogos', 'pc'], capacity: 50 },
+  { id: 'amizade-bauru', name: 'Amizades Bauru', category: '🏙️ Cidades', description: 'Pessoas de Bauru e região.', tags: ['bauru', 'sp', 'amizade'], capacity: 50 },
+  { id: 'amizade-brasil', name: 'Amigos Brasil', category: '🤝 Amizade', description: 'Pessoas do Brasil todo.', tags: ['brasil', 'br', 'amizade'], capacity: 50 },
+  { id: 'geral', name: 'Geral', category: '🤝 Amizade', description: 'Sala livre para todos os assuntos.', tags: ['geral', 'livre'], capacity: 100 }
+];
+
 const dbRooms = getRooms();
 if (dbRooms.length === 0) {
-  ROOMS_DATA.set('geral', { name: 'geral', creator: 'Sistema', createdAt: new Date().toISOString() });
+  INITIAL_ROOMS.forEach(r => {
+    const rData = { ...r, creator: 'Sistema', createdAt: new Date().toISOString() };
+    ROOMS_DATA.set(r.id, rData);
+    saveRoom(r.id, rData.creator, r.category, r.description, r.tags, r.capacity);
+  });
 } else {
   dbRooms.forEach(r => ROOMS_DATA.set(r.name, r));
+  // Adiciona as iniciais se não existirem e sincroniza os campos de lobby
+  INITIAL_ROOMS.forEach(r => {
+    const rData = { ...r, creator: 'Sistema', createdAt: new Date().toISOString() };
+    if (!ROOMS_DATA.has(r.id)) {
+      ROOMS_DATA.set(r.id, rData);
+    } else {
+      const existing = ROOMS_DATA.get(r.id);
+      existing.category = r.category;
+      existing.description = r.description;
+      existing.tags = r.tags;
+      existing.capacity = r.capacity;
+    }
+    saveRoom(r.id, rData.creator, r.category, r.description, r.tags, r.capacity);
+  });
 }
 
 const AVAILABLE_ROOMS = () => Array.from(ROOMS_DATA.keys());
 const ROOM_LABELS = {}; // Será preenchido dinamicamente
-dbRooms.forEach(r => { ROOM_LABELS[r.name] = `# ${r.name}`; });
+ROOMS_DATA.forEach((val, key) => { ROOM_LABELS[key] = val.name; });
 if (!ROOM_LABELS['geral']) ROOM_LABELS['geral'] = 'Geral';
-const ALLOWED_REACTIONS = ['😀','😂','😍','🤔','😎','🥳','😢','😡','👍','👎','🙌','🔥','❤️','✅','⚡','🎉','💡','🚀','💬','🤝','😮','🥹','😴','🤣'];
+const ALLOWED_REACTIONS = ['😀', '😂', '😍', '🤔', '😎', '🥳', '😢', '😡', '👍', '👎', '🙌', '🔥', '❤️', '✅', '⚡', '🎉', '💡', '🚀', '💬', '🤝', '😮', '🥹', '😴', '🤣'];
 
 const rateLimiter = new RateLimiter({ windowMs: RATE_WINDOW, maxRequests: RATE_MAX });
 const clients = new Map(); // Map<ws, { name, room, sessionId, isAlive }>
@@ -81,13 +110,52 @@ function broadcastRoomList() {
 function broadcastUserList() {
   const users = [];
   clients.forEach((info) => {
-    if (info.name) {
+    if (info.name && info.room !== 'lobby') {
       users.push({ name: info.name, status: info.status || 'online' });
     }
   });
   const payload = JSON.stringify({ type: 'user_list', users });
   clients.forEach((_, ws) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+  });
+}
+
+function getLobbyPayload() {
+  const rooms = [];
+  ROOMS_DATA.forEach((data, id) => {
+    let onlineCount = 0;
+    clients.forEach((info) => {
+      if (info.room === id || info.room === data.name) onlineCount++;
+    });
+    rooms.push({
+      id: id,
+      name: data.name || id,
+      category: data.category || 'Outros',
+      description: data.description || '',
+      tags: data.tags || [],
+      onlineCount: onlineCount,
+      capacity: data.capacity || 50
+    });
+  });
+
+  let totalOnline = 0;
+  clients.forEach(info => { if (info.name || info.room === 'lobby') totalOnline++; });
+
+  return {
+    type: 'lobby_update',
+    payload: {
+      totalOnline,
+      rooms
+    }
+  };
+}
+
+function broadcastLobbyUpdate() {
+  const payload = JSON.stringify(getLobbyPayload());
+  clients.forEach((info, ws) => {
+    if (info.room === 'lobby' && ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
   });
 }
 
@@ -116,6 +184,12 @@ function now() { return new Date().toISOString(); }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
+function handleJoinLobby(ws, msg) {
+  const sessionId = msg.sessionId || uuidv4();
+  clients.set(ws, { name: null, room: 'lobby', sessionId, isAlive: true, status: 'online' });
+  send(ws, getLobbyPayload());
+}
+
 function handleJoin(ws, msg) {
   try {
     const name = validateName(msg.name);
@@ -123,9 +197,16 @@ function handleJoin(ws, msg) {
 
     const roomName = msg.room || 'geral';
     if (!ROOMS_DATA.has(roomName)) {
-      ROOMS_DATA.set(roomName, { name: roomName, creator: 'Sistema', createdAt: new Date().toISOString() });
+      const category = msg.category || 'Outros';
+      const description = msg.description || '';
+      const tags = msg.tags || [];
+      const capacity = msg.capacity ? parseInt(msg.capacity, 10) : 50;
+      
+      const rData = { name: roomName, creator: 'Sistema', createdAt: new Date().toISOString(), category, description, tags, capacity };
+      ROOMS_DATA.set(roomName, rData);
+      saveRoom(roomName, rData.creator, category, description, tags, capacity);
     }
-    
+
     const room = roomName;
     if (isNameTaken(name, room, ws)) {
       return send(ws, { type: 'error', text: `O nome "${name}" já está em uso nesta sala.` });
@@ -137,11 +218,12 @@ function handleJoin(ws, msg) {
     const { messages: history, hasMore } = getHistory(room, 30);
     const roomInfo = ROOMS_DATA.get(room);
     send(ws, { type: 'welcome', sessionId, name, room, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
-    
+
     broadcastRoomList();
+    broadcastLobbyUpdate();
 
     console.log(`[join] ${name} → "${room}"`);
-    broadcast({ type: 'info', text: `${name} entrou no chat 👋`, timestamp: now() }, room, ws);
+    broadcast({ type: 'info', text: `${name} entrou no chat 👋`, timestamp: now(), room }, room);
     broadcastUserList();
   } catch (err) {
     console.error('[handleJoin] Error:', err);
@@ -196,24 +278,31 @@ function handleSwitchRoom(ws, msg, info) {
 
     // Adiciona à lista de salas se for nova
     if (!ROOMS_DATA.has(newRoom)) {
-      const rData = { name: newRoom, creator: info.name || 'Sistema', createdAt: new Date().toISOString() };
+      const category = msg.category || 'Outros';
+      const description = msg.description || '';
+      const tags = msg.tags || [];
+      const capacity = msg.capacity ? parseInt(msg.capacity, 10) : 50;
+      
+      const rData = { name: newRoom, creator: info.name || 'Sistema', createdAt: new Date().toISOString(), category, description, tags, capacity };
       ROOMS_DATA.set(newRoom, rData);
-      saveRoom(newRoom, rData.creator);
+      saveRoom(newRoom, rData.creator, category, description, tags, capacity);
     }
-    
+
     if (!ROOM_LABELS[newRoom]) ROOM_LABELS[newRoom] = `# ${newRoom}`;
 
     info.room = newRoom;
     const { messages: history, hasMore } = getHistory(newRoom, 30);
     const roomInfo = ROOMS_DATA.get(newRoom);
     send(ws, { type: 'room_changed', room: newRoom, roomInfo, rooms: AVAILABLE_ROOMS(), history, hasMore, timestamp: now() });
-    
+
     broadcastRoomList();
+    broadcastLobbyUpdate();
     broadcastUserList();
-    
+
     if (oldRoom && oldRoom !== newRoom) {
-      broadcast({ type: 'info', text: `${info.name} entrou na sala 👋`, timestamp: now() }, newRoom, ws);
+      broadcast({ type: 'info', text: `${info.name} saiu da sala 👋`, timestamp: now(), room: oldRoom }, oldRoom);
     }
+    broadcast({ type: 'info', text: `${info.name} entrou na sala 👋`, timestamp: now(), room: newRoom }, newRoom);
     console.log(`[switch_room] ${info.name} → "${newRoom}" (${Date.now() - start}ms)`);
   } catch (err) {
     console.error('[handleSwitchRoom] Error:', err);
@@ -225,10 +314,10 @@ function handleDeleteRoom(ws, msg, info) {
     if (!info.name) return;
     const room = msg.room;
     if (room === 'geral') return send(ws, { type: 'error', text: 'A sala Geral não pode ser excluída.' });
-    
+
     const roomInfo = ROOMS_DATA.get(room);
     if (!roomInfo) return send(ws, { type: 'error', text: 'Sala não encontrada.' });
-    
+
     if (roomInfo.creator !== info.name && info.name !== 'Admin') {
       return send(ws, { type: 'error', text: 'Apenas o criador da sala pode excluí-la.' });
     }
@@ -243,7 +332,8 @@ function handleDeleteRoom(ws, msg, info) {
     // 3. Avisa a todos
     broadcast({ type: 'room_deleted', room }, room); // Avisa quem está na sala
     broadcastRoomList(); // Atualiza lista para todos
-    
+    broadcastLobbyUpdate();
+
     console.log(`[delete_room] ${info.name} excluiu a sala "${room}"`);
   } catch (err) {
     console.error('[handleDeleteRoom] Error:', err);
@@ -318,9 +408,9 @@ function handleSetStatus(ws, msg, info) {
     const validStatuses = ['online', 'away', 'busy'];
     const status = validStatuses.includes(msg.status) ? msg.status : 'online';
     info.status = status;
-    
+
     broadcastUserList();
-    
+
     console.log(`[status] ${info.name} -> ${status}`);
   } catch (err) {
     console.error('[handleSetStatus] Error:', err);
@@ -339,10 +429,10 @@ function handlePrivateMessage(ws, msg, info) {
     const id = uuidv4();
     const timestamp = now();
     const room = getPrivateRoomId(info.name, msg.to);
-    
+
     // Suporte a replyTo em DMs
     const replyTo = msg.replyTo || null;
-    
+
     const payload = { type: 'message', id, name: info.name, text, room, timestamp, isPrivate: true, to: msg.to, replyTo };
 
     send(ws, payload); // Envia para o remetente
@@ -441,21 +531,22 @@ function setupChatHandler(wss) {
       }
 
       switch (msg.type) {
-        case 'join':           handleJoin(ws, msg); break;
-        case 'message':        handleChatMessage(ws, msg, info || {}); break;
-        case 'typing':         handleTyping(ws, msg, info || {}); break;
-        case 'switch_room':    handleSwitchRoom(ws, msg, info || {}); break;
-        case 'load_history':   handleLoadHistory(ws, msg, info || {}); break;
-        case 'react':          handleReact(ws, msg, info || {}); break;
-        case 'edit_message':   handleEditMessage(ws, msg, info || {}); break;
+        case 'join_lobby': handleJoinLobby(ws, msg); break;
+        case 'join': handleJoin(ws, msg); break;
+        case 'message': handleChatMessage(ws, msg, info || {}); break;
+        case 'typing': handleTyping(ws, msg, info || {}); break;
+        case 'switch_room': handleSwitchRoom(ws, msg, info || {}); break;
+        case 'load_history': handleLoadHistory(ws, msg, info || {}); break;
+        case 'react': handleReact(ws, msg, info || {}); break;
+        case 'edit_message': handleEditMessage(ws, msg, info || {}); break;
         case 'delete_message': handleDeleteMessage(ws, msg, info || {}); break;
-        case 'change_status':   handleSetStatus(ws, msg, info || {}); break;
+        case 'change_status': handleSetStatus(ws, msg, info || {}); break;
         case 'private_message': handlePrivateMessage(ws, msg, info || {}); break;
-        case 'delete_room':     handleDeleteRoom(ws, msg, info || {}); break;
-        case 'mark_read':       handleMarkRead(ws, msg, info || {}); break;
-        case 'search':          handleSearch(ws, msg, info || {}); break;
-        case 'clear_messages':  handleClearMessages(ws, msg, info || {}); break;
-        default:               send(ws, { type: 'error', text: 'Tipo de mensagem desconhecido.' });
+        case 'delete_room': handleDeleteRoom(ws, msg, info || {}); break;
+        case 'mark_read': handleMarkRead(ws, msg, info || {}); break;
+        case 'search': handleSearch(ws, msg, info || {}); break;
+        case 'clear_messages': handleClearMessages(ws, msg, info || {}); break;
+        default: send(ws, { type: 'error', text: 'Tipo de mensagem desconhecido.' });
       }
     });
 
@@ -463,11 +554,12 @@ function setupChatHandler(wss) {
       const info = clients.get(ws);
       rateLimiter.remove(ws);
       clients.delete(ws);
-      if (info && info.name && info.room) {
+      if (info && info.name && info.room && info.room !== 'lobby') {
         console.log(`[desconexão] ${info.name} saiu de "${info.room}"`);
-        broadcast({ type: 'info', text: `${info.name} saiu do chat 👋`, timestamp: now() }, info.room);
+        broadcast({ type: 'info', text: `${info.name} saiu do chat 👋`, timestamp: now(), room: info.room }, info.room);
         broadcastUserList();
       }
+      broadcastLobbyUpdate();
     });
 
     ws.on('error', (err) => console.error(`[erro ws] ${err.message}`));

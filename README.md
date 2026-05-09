@@ -10,7 +10,13 @@ Um ecossistema de comunicação em tempo real projetado para alta performance, e
 
 ## 🚀 Funcionalidades de Destaque
 
-### 💎 Experiência do Usuário (UX)
+### 💎 Nova Experiência de Lobby (MVP UOL-like)
+- **Zero Fricção**: Entrada no chat exigindo apenas a escolha de um Nickname, focando em altíssima conversão.
+- **Prova Social em Tempo Real**: O Lobby (Dashboard de entrada) exibe a lotação e o total de usuários online ao vivo usando WebSockets, antes mesmo do usuário entrar na sala.
+- **Catálogo de Salas Temáticas**: Salas categorizadas (Relacionamento, Amizade, Games, Cidades, etc.) para conectar pessoas com interesses comuns.
+- **Design Moderno**: Interface responsiva e modular (HTML/CSS/JS separados) construída com CSS Grid e Flexbox em modo noturno (Dark Mode).
+
+### 💬 Experiência do Chat
 - **Mensageria Híbrida**: Salas públicas dinâmicas e Chats Privados (DMs) isolados.
 - **Interatividade Social**: Sistema de reações com emojis e respostas (Reply) contextuais.
 - **Gestão de Mensagens**: Edição e exclusão de mensagens com "soft delete".
@@ -35,11 +41,14 @@ Um ecossistema de comunicação em tempo real projetado para alta performance, e
 
 ## 📈 Visão de Negócio & Monetização
 
-Este projeto foi concebido como um **MVP (Minimum Viable Product)** escalável. Potenciais modelos de negócio incluem:
+O produto pivotou para um modelo focado em **crescimento massivo (B2C)**, inspirado nos bate-papos clássicos (como UOL).
 
-1. **SaaS para Comunidades Nichadas**: Chat exclusivo para eventos online ou fóruns de membros.
-2. **Widget White-Label**: API de comunicação interna para empresas que priorizam privacidade de dados.
-3. **Modelo Freemium**: Monetização via salas VIP, temas customizados ou limites expandidos de upload.
+Estratégias de Monetização Preparadas na Arquitetura:
+1. **Modelo VIP (Assinatura Mensal)**:
+   - *Fura-Fila*: Capacidade das salas é limitadas (ex: 50 pessoas). Apenas usuários VIP podem furar a fila.
+   - *Exclusividade*: Ícones e cores de nickname customizadas.
+2. **Microtransações & Gifting**: Envio de presentes virtuais e animações na sala geral.
+3. **Ads Nativos**: Espaços definidos no Lobby para banners patrocinados (Google AdSense ou Venda Direta).
 
 ---
 

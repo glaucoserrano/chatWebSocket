@@ -43,6 +43,13 @@ try {
     CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room);
   `);
 
+  try {
+    db.exec(`ALTER TABLE rooms ADD COLUMN category TEXT DEFAULT 'Outros'`);
+    db.exec(`ALTER TABLE rooms ADD COLUMN description TEXT DEFAULT ''`);
+    db.exec(`ALTER TABLE rooms ADD COLUMN tags TEXT DEFAULT '[]'`);
+    db.exec(`ALTER TABLE rooms ADD COLUMN capacity INTEGER DEFAULT 50`);
+  } catch(e) {} // Falha silenciosamente se a coluna já existir
+
   console.log('[db] Tabelas verificadas/criadas com sucesso.');
 
   // Insere sala Geral por padrão
@@ -58,15 +65,27 @@ try {
 
 /** --- SALAS --- **/
 
-function saveRoom(name, creator) {
+function saveRoom(name, creator, category = 'Outros', description = '', tags = [], capacity = 50) {
   if (!db) return;
-  const stmt = db.prepare('INSERT OR IGNORE INTO rooms (name, creator, createdAt) VALUES (?, ?, ?)');
-  stmt.run(name, creator, new Date().toISOString());
+  const stmt = db.prepare(`
+    INSERT INTO rooms (name, creator, createdAt, category, description, tags, capacity) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET 
+      category=excluded.category,
+      description=excluded.description,
+      tags=excluded.tags,
+      capacity=excluded.capacity
+  `);
+  stmt.run(name, creator, new Date().toISOString(), category, description, JSON.stringify(tags), capacity);
 }
 
 function getRooms() {
   if (!db) return [];
-  return db.prepare('SELECT * FROM rooms').all();
+  const rows = db.prepare('SELECT * FROM rooms').all();
+  return rows.map(r => ({
+    ...r,
+    tags: r.tags ? JSON.parse(r.tags) : []
+  }));
 }
 
 function deleteRoom(name) {
